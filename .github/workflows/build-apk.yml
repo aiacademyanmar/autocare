@@ -1,0 +1,69 @@
+name: AUTO CARE V2.8 Build APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode source/AUTO_CARE_V2_8_GITHUB_SOURCES.tar.xz.base64 > source.tar.xz
+          tar -xJf source.tar.xz
+          test -f android/settings.gradle.kts
+          test -f android/app/src/main/AndroidManifest.xml
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Android SDK prerequisites
+        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Android unit tests
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon -p android testDebugUnitTest 2>&1 | tee gradle-tests.log
+      - name: Build installable debug APK
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon -p android --stacktrace assembleDebug 2>&1 | tee gradle-build.log
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee apk-badging.txt
+          grep -F "package: name='asia.aaii.autocare' versionCode='28' versionName='2.8.0'" apk-badging.txt
+          sha256sum "$APK" > app-debug.sha256
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUTO-CARE-V2.8-debug-APK
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            app-debug.sha256
+            apk-badging.txt
+          if-no-files-found: error
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AUTO-CARE-V2.8-build-logs
+          path: |
+            gradle-*.log
+            android/app/build/reports/
+            android/app/build/test-results/
+          if-no-files-found: ignore
